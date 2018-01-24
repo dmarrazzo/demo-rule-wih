@@ -18,10 +18,11 @@ import org.kie.api.runtime.StatelessKieSession;
 import org.kie.api.runtime.process.WorkItem;
 import org.kie.api.runtime.process.WorkItemHandler;
 import org.kie.api.runtime.process.WorkItemManager;
+import org.kie.internal.runtime.Cacheable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class LooseRulesWorkItemHandler implements WorkItemHandler {
+public class LooseRulesWorkItemHandler implements WorkItemHandler, Cacheable {
 	public final static String WORKITEMHANDLER_NAME = "LOOSE_RULES_WIH";
 	
     private KieServices kieServices = KieServices.Factory.get();
@@ -63,7 +64,6 @@ public class LooseRulesWorkItemHandler implements WorkItemHandler {
 			kieBase = kieContainer.getKieBase(kbaseName);
 			
 			handleStateless(workItem, parameters, results);
-			
 			manager.completeWorkItem(workItem.getId(), results);
 		} catch (Exception e) {
 			e.printStackTrace();
@@ -75,27 +75,36 @@ public class LooseRulesWorkItemHandler implements WorkItemHandler {
 		log.trace("{} abortWIH", WORKITEMHANDLER_NAME);
 		manager.abortWorkItem(workItem.getId());
 	}
-	
-    protected void handleStateless(WorkItem workItem, Map<String, Object> parameters, Map<String, Object> results) {
-        log.debug("Evalating rules in stateless session");
-        
-        StatelessKieSession kieSession = kieBase.newStatelessKieSession();
-        List<Command<?>> commands = new ArrayList<Command<?>>();
-        
-        for (Entry<String, Object> entry : parameters.entrySet()) {
-            String inputKey = workItem.getId() + "_" + entry.getKey();
 
-            commands.add(commandsFactory.newInsert(entry.getValue(), inputKey, true, null));
-        }
-        commands.add(commandsFactory.newFireAllRules("Fired"));
-        BatchExecutionCommand executionCommand = commandsFactory.newBatchExecution(commands);
-        ExecutionResults executionResults = kieSession.execute(executionCommand);
-        log.debug("{} rules fired", executionResults.getValue("Fired"));
-        System.out.println("rules fired: "+executionResults.getValue("Fired"));
-        for (Entry<String, Object> entry : parameters.entrySet()) {
-            String inputKey = workItem.getId() + "_" + entry.getKey();
-            String key = entry.getKey().replaceAll(workItem.getId() + "_", "");
-            results.put(key, executionResults.getValue(inputKey));
-        }
-    }
+	protected void handleStateless(WorkItem workItem, Map<String, Object> parameters, Map<String, Object> results) {
+		log.debug("Evalating rules in stateless session");
+
+		StatelessKieSession kieSession = kieBase.newStatelessKieSession();
+		List<Command<?>> commands = new ArrayList<Command<?>>();
+
+		for (Entry<String, Object> entry : parameters.entrySet()) {
+			String inputKey = workItem.getId() + "_" + entry.getKey();
+
+			commands.add(commandsFactory.newInsert(entry.getValue(), inputKey, true, null));
+		}
+		commands.add(commandsFactory.newFireAllRules("Fired"));
+		BatchExecutionCommand executionCommand = commandsFactory.newBatchExecution(commands);
+		ExecutionResults executionResults = kieSession.execute(executionCommand);
+		log.debug("{} rules fired", executionResults.getValue("Fired"));
+		System.out.println("rules fired: " + executionResults.getValue("Fired"));
+		for (Entry<String, Object> entry : parameters.entrySet()) {
+			String inputKey = workItem.getId() + "_" + entry.getKey();
+			String key = entry.getKey().replaceAll(workItem.getId() + "_", "");
+			results.put(key, executionResults.getValue(inputKey));
+		}
+	}
+
+	@Override
+	public void close() {
+		if (kieScanner != null) {
+			kieScanner.shutdown();
+			log.debug("Scanner shutdown for kie container {}", kieContainer);
+		}
+		kieContainer.dispose();
+	}
 }
